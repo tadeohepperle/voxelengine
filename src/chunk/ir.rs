@@ -6,13 +6,13 @@ use bevy::{
 use super::{
     pos::{self, Pos},
     voxel::Matter,
-    Chunk,
+    Chunk, Side,
 };
 
 #[derive(Debug, Clone)]
 pub struct ChunkIR {
     pub quads: Vec<QuadIR>,
-    pub triags: Vec<TriangleIR>,
+    pub triags: Vec<TriagIR>,
     pub edges: Vec<EdgeIR>,
 }
 
@@ -32,7 +32,7 @@ pub fn calculate_triag_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 }
 
 #[derive(Debug, Clone)]
-pub struct TriangleIR {
+pub struct TriagIR {
     pub matter: Matter,
     pub a: Pos,
     pub b: Pos,
@@ -49,52 +49,35 @@ pub struct EdgeIR {
 impl ChunkIR {
     pub fn construct_from_chunk(chunk: &Chunk) -> Self {
         let mut quads: Vec<QuadIR> = vec![];
-        let mut triags: Vec<TriangleIR> = vec![];
+        let mut triags: Vec<TriagIR> = vec![];
         let mut edges: Vec<EdgeIR> = vec![];
 
-        for (pos, voxel) in chunk.voxels.iter() {
-            if voxel.corner.strong() {
-                let corners = chunk.get_voxel_corners(*pos);
+        let mut add_side = |side: Side, matter: Matter| match side {
+            super::Side::None => {}
+            super::Side::Triag(a, b, c) => {
+                let triag = TriagIR { matter, a, b, c };
+                triags.push(triag);
+            }
+            super::Side::Quad(a, b, c, d) => {
+                let quad = QuadIR { matter, a, b, c, d };
+                quads.push(quad);
+            }
+        };
 
+        for (pos, voxel) in chunk.voxels.iter() {
+            if !voxel.corner.air() {
+                let corner_info = chunk.get_voxel_corner_info(*pos, voxel.corner);
                 // add x side:
                 if let Some(matter) = voxel.x_side {
-                    if corners.y.strong() && corners.yz.strong() && corners.z.strong() {
-                        let quad = QuadIR {
-                            matter,
-                            a: *pos,
-                            b: corners.y_pos,
-                            c: corners.yz_pos,
-                            d: corners.z_pos,
-                        };
-                        quads.push(quad);
-                    }
+                    add_side(corner_info.x_side(), matter);
                 }
-
                 // add y side:
                 if let Some(matter) = voxel.y_side {
-                    if corners.x.strong() && corners.xz.strong() && corners.z.strong() {
-                        let quad = QuadIR {
-                            matter,
-                            a: *pos,
-                            b: corners.x_pos,
-                            c: corners.xz_pos,
-                            d: corners.z_pos,
-                        };
-                        quads.push(quad);
-                    }
+                    add_side(corner_info.y_side(), matter);
                 }
                 // add z side:
                 if let Some(matter) = voxel.z_side {
-                    if corners.x.strong() && corners.xy.strong() && corners.y.strong() {
-                        let quad = QuadIR {
-                            matter,
-                            a: *pos,
-                            b: corners.x_pos,
-                            c: corners.xy_pos,
-                            d: corners.y_pos,
-                        };
-                        quads.push(quad);
-                    }
+                    add_side(corner_info.z_side(), matter);
                 }
             }
         }
@@ -203,10 +186,32 @@ impl ChunkIR {
             let d: [f32; 3] = d.into();
 
             // draw double sided triangles:
+
             add_triangle(a, b, c, a_uv, b_uv, c_uv, normal);
             add_triangle(a, c, b, a_uv, c_uv, b_uv, neg_normal);
             add_triangle(a, c, d, a_uv, c_uv, d_uv, normal);
             add_triangle(a, d, c, a_uv, d_uv, c_uv, neg_normal);
+        }
+
+        for triag in self.triags.iter() {
+            let a: Vec3 = triag.a.into();
+            let b: Vec3 = triag.b.into();
+            let c: Vec3 = triag.c.into();
+
+            let normal = calculate_triag_normal(a, b, c);
+            let neg_normal: [f32; 3] = (-normal).into();
+            let normal: [f32; 3] = normal.into();
+
+            let a: [f32; 3] = a.into();
+            let b: [f32; 3] = b.into();
+            let c: [f32; 3] = c.into();
+
+            let a_uv = [0.0, 0.0];
+            let b_uv = [0.0, 1.0];
+            let c_uv = [1.0, 1.0];
+            // add two triangles to achieve double sided look
+            add_triangle(a, b, c, a_uv, b_uv, c_uv, normal);
+            add_triangle(a, c, b, a_uv, c_uv, b_uv, neg_normal);
         }
 
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, verts);
